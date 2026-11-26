@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 
 class CartItem extends Model
@@ -12,7 +13,11 @@ class CartItem extends Model
         'quantity',
 
     ];
-
+    /*
+    |--------------------------------------------------------------------------
+    | Relationships
+    |--------------------------------------------------------------------------
+    */
     public function cart()
     {
         return $this->belongsTo(Cart::class);
@@ -21,6 +26,18 @@ class CartItem extends Model
     public function product()
     {
         return $this->belongsTo(Product::class);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    |  Helper Functions
+    |--------------------------------------------------------------------------
+    */
+    protected function lineTotal(): Attribute
+    {
+        return Attribute::get(
+            fn () => bcmul($this->product->price, (string) $this->quantity, 2)
+        );
     }
 
 }

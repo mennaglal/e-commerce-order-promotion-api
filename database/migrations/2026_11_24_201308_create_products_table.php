@@ -26,9 +26,10 @@ return new class extends Migration
             $table->boolean('status')->default(true);
 
             $table->timestamps();
-            $table->softDeletes();
 
-            $table->index('price');
+            $table->index(['status', 'price']);
+            $table->index('stock_quantity');
+
         });
     }
 

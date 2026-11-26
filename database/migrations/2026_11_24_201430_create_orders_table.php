@@ -15,8 +15,10 @@ return new class extends Migration
             $table->id();
 
             $table->foreignId('user_id')
-                ->constrained('promotion_codes')
+                ->constrained()
                 ->restrictOnDelete();
+
+            $table->uuid('idempotency_key')->nullable();
 
             $table->string('customer_name')->nullable();
             $table->string('customer_email')->nullable();
@@ -25,7 +27,7 @@ return new class extends Migration
 
             $table->foreignId('promotion_id')
                 ->nullable()
-                ->constrained()
+                ->constrained('promotion_codes')
                 ->nullOnDelete();
 
             $table->string('promotion_code')->nullable();
@@ -55,7 +57,10 @@ return new class extends Migration
 
             $table->timestamps();
 
+            $table->unique(['user_id', 'idempotency_key']);
             $table->index(['user_id', 'status']);
+            $table->index(['user_id', 'created_at']);
+
 
 
         });

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 
 class Cart extends Model
@@ -10,6 +11,12 @@ class Cart extends Model
     protected $fillable = [
         'user_id',
     ];
+
+    /*
+    |--------------------------------------------------------------------------
+    | Relationships
+    |--------------------------------------------------------------------------
+    */
     public function user()
     {
         return $this->belongsTo(User::class);
@@ -18,6 +25,22 @@ class Cart extends Model
     public function items()
     {
         return $this->hasMany(CartItem::class);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    |  Helper Functions
+    |--------------------------------------------------------------------------
+    */
+
+    protected function subtotal(): Attribute
+    {
+        return Attribute::get(
+            fn () => $this->items->reduce(
+                fn (string $total, CartItem $item) => bcadd($total, $item->line_total, 2),
+                '0.00'
+            )
+        );
     }
 
 }
