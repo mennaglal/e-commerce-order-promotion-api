@@ -21,7 +21,9 @@ The main design goals were: **never oversell stock**, **never trust the client f
 - **Cancellation:** allowed only from `pending` or `confirmed`; restores stock; safe to call many times.
 - **Concurrency:** pessimistic row locking, explained in [section 6](#6-concurrency).
 - **Validation and errors:** Form Requests, meaningful status codes and one JSON error format.
-- **Bonus:** Redis caching of the product list, queued order-confirmation e-mail (event + listener), idempotent checkout, API rate limiting, database indexes (explained below), and an admin panel for products and promotion codes.
+
+- **Bonus features implemented:** Redis caching of the product list, queued order-confirmation emails (events + listeners), idempotent checkout, API rate limiting, database indexes, and an admin panel for products and promotion codes.
+- **Not implemented:** Docker/Laravel Sail setup, due to the available assessment timeframe. The project can be run locally using the setup instructions above.
 - **Not included:** Docker/Sail.
 
 ---
