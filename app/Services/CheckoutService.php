@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\OrderPlaced;
 use App\Models\Cart;
 use App\Models\Order;
 use App\Models\Product;
@@ -9,103 +10,94 @@ use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class CheckoutService
 {
     private const CURRENCY = 'EGP';
 
     public function __construct(
-         InventoryService $inventory,
-         PromotionCodeService $promotions,
+        private InventoryService $inventory,
+        private PromotionCodeService $promotions,
     ) {
     }
 
-
-    public function checkout(User $user, array $data, string $key): array
+    public function checkout(User $user, array $data, string $idempotency_key): array
     {
-        DB::beginTransaction();
-
         try {
-            $result = $this->placeOrder($user, $data, $key);
+            $result = DB::transaction(
+                fn () => $this->placeOrder($user, $data, $idempotency_key)
+            );
 
-            if (isset($result['error'])) {
-                DB::rollBack();
-
-                return $result;
+            // Dispatch the event only for newly created orders.
+            if ($result['success'] && $result['order']->wasRecentlyCreated) {
+                try {
+                    OrderPlaced::dispatch($result['order']);
+                } catch (\Throwable $e) {
+                    Log::error('Failed to dispatch OrderPlaced event.', [
+                        'order_id' => $result['order']->id,
+                        'user_id' => $user->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
-            DB::commit();
+            return $result;
+        }
+        catch (UniqueConstraintViolationException $e) {
 
-            return [
-                'order' => $result['order']->load('items'),
-                'created' => $result['created'],
-            ];
+            // Two requests used the same key at the same time,
+            // so the database rejected the second one.
 
-        } catch (UniqueConstraintViolationException $e) {
-            DB::rollBack();
+            $order = $this->findByKey($user, $idempotency_key) ?? throw $e;
 
-            $order = $this->findByKey($user, $key);
-
-            if (! $order) {
-                throw $e;
-            }
-
-            return [
-                'order' => $order->load('items'),
-                'created' => false,
-            ];
-
-        } catch (\Throwable $e) {
-            DB::rollBack();
-
-            throw $e;
+            return ['success' => true, 'order' => $order->load('items')];
         }
     }
-    private function placeOrder(User $user, array $data, string $key): array
+
+
+    private function placeOrder(User $user, array $data, string $idempotency_key): array
     {
+        // Lock the user cart to prevent concurrent checkout requests.
         $cart = Cart::where('user_id', $user->id)
             ->lockForUpdate()
             ->first();
 
-        if ($existing = $this->findByKey($user, $key, lock: true)) {
-            return [
-                'order' => $existing,
-                'created' => false,
-            ];
+        // Check if an order with this key already exists.
+        $existing = $this->findByKey($user, $idempotency_key);
+        if ($existing) {
+            return ['success' => true, 'order' => $existing->load('items')];
         }
 
+        // Make sure the cart is not empty.
         $items = $cart ? $cart->items()->get() : collect();
 
         if ($items->isEmpty()) {
             return $this->failure('Your cart is empty.', 'cart_empty');
         }
 
+        // Lock products in ID order to reduce the risk of deadlocks.
         $products = Product::whereIn('id', $items->pluck('product_id'))
             ->orderBy('id')
             ->lockForUpdate()
             ->get()
             ->keyBy('id');
 
+        // Check stock and calculate subtotal using database prices.
         $subtotal = '0.00';
         $lines = [];
 
         foreach ($items as $item) {
-            $product = $products->get($item->product_id);
+            $product = $products[$item->product_id];
 
-            if (! $product || $product->trashed()) {
+            $check = $this->inventory->checkAvailability($product, $item->quantity);
+
+            if (! $check['available']) {
                 return $this->failure(
-                    'One or more products are unavailable.',
-                    'product_unavailable'
+                    $check['message'],
+                    $check['errors']['code'],
+                    $check['errors']
                 );
-            }
-
-            $inventoryError = $this->inventory->assertAvailable(
-                $product,
-                $item->quantity
-            );
-
-            if ($inventoryError !== null) {
-                return ['error' => $inventoryError];
             }
 
             $subtotal = bcadd(
@@ -114,104 +106,103 @@ class CheckoutService
                 2
             );
 
-            $lines[] = [$product, $item->quantity];
+            $lines[] = [
+                'product' => $product,
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'product_sku' => $product->sku,
+                'product_price' => $product->price,
+                'product_quantity' => $item->quantity,
+            ];
         }
 
+        // Validate the promotion and calculate the discount.
         $promotion = null;
         $discount = '0.00';
 
         if (filled($data['promotion_code'] ?? null)) {
             $promotion = $this->promotions->findByCode(
                 $data['promotion_code'],
-                lock: true
+                true
             );
 
             if (! $promotion) {
-                return $this->failure(
-                    'Invalid coupon code.',
-                    'coupon_invalid'
-                );
+                return $this->failure('Invalid coupon code.', 'coupon_invalid');
             }
 
-            $promotionError = $this->promotions->assertEligible(
+            $eligibility = $this->promotions->checkEligibility(
                 $promotion,
                 $user,
                 $subtotal
             );
 
-            if ($promotionError !== null) {
-                return ['error' => $promotionError];
+            if (! $eligibility['valid']) {
+                return $this->failure(
+                    $eligibility['message'],
+                    $eligibility['errors']['code']
+                );
             }
 
-            $discount = $this->promotions->calculateDiscount(
-                $promotion,
-                $subtotal
-            );
+            $discount = $this->promotions->calculateDiscount($promotion, $subtotal);
         }
 
-        $total = bcsub($subtotal, $discount, 2);
+        // All checks passed. Start creating the order.
 
-        $order = new Order(
-            Arr::only($data, [
-                'customer_name',
-                'customer_phone',
-                'address',
-                'notes',
-            ])
-        );
+        $order = new Order([
+            'customer_name'  => $data['customer_name'] ?? $user->name,
+            'customer_email' => $data['customer_email'] ?? $user->email,
+            'customer_phone' => $data['customer_phone'] ?? $user->phone,
+            'address'        => $data['address'],
+            'payment_method'        => $data['payment_method'],
+            'notes'          => $data['notes'] ?? null,
+        ]);
 
         $order->user_id = $user->id;
-        $order->customer_name ??= $user->name;
-        $order->customer_email = $user->email;
         $order->promotion_id = $promotion?->id;
         $order->promotion_code = $promotion?->code;
         $order->subtotal = $subtotal;
         $order->discount_amount = $discount;
-        $order->total = $total;
+        $order->total = bcsub($subtotal, $discount, 2);
         $order->currency = self::CURRENCY;
         $order->status = Order::STATUS_PENDING;
-        $order->idempotency_key = $key;
+        $order->idempotency_key = $idempotency_key;
+
         $order->save();
 
-        foreach ($lines as [$product, $quantity]) {
+        foreach ($lines as $line) {
+
+            // Save product details to keep the original order information.
             $order->items()->create([
-                'product_id' => $product->id,
-                'product_name' => $product->name,
-                'product_sku' => $product->sku,
-                'product_price' => $product->price,
-                'product_quantity' => $quantity,
+                'product_id'       => $line['product_id'],
+                'product_name'     => $line['product_name'],
+                'product_sku'      => $line['product_sku'],
+                'product_price'    => $line['product_price'],
+                'product_quantity' => $line['product_quantity'],
             ]);
 
-            $updated = Product::whereKey($product->id)
-                ->where('stock_quantity', '>=', $quantity)
-                ->decrement('stock_quantity', $quantity);
-
-            if ($updated === 0) {
-                return $this->failure(
-                    "Insufficient stock for '{$product->name}'.",
-                    'insufficient_stock',
-                    ['product_id' => $product->id]
-                );
-            }
+            // Reduce stock after checking availability.
+            $line['product']->decrement(
+                'stock_quantity',
+                $line['product_quantity']
+            );
         }
 
         if ($promotion) {
             $order->promotionUsages()->create([
                 'promotion_id' => $promotion->id,
-                'user_id' => $user->id,
+                'user_id'      => $user->id,
             ]);
         }
 
+        // Clear the cart after successfully creating the order.
         $cart->items()->delete();
 
-        return [
-            'order' => $order,
-            'created' => true,
-        ];
+        return ['success' => true, 'order' => $order->load('items')];
     }
-    private function findByKey(User $user, string $key, bool $lock = false): ?Order
+
+    private function findByKey(User $user, string $idempotency_key, bool $lock = false): ?Order
     {
-        $query = Order::where('user_id', $user->id)->where('idempotency_key', $key);
+        $query = Order::where('user_id', $user->id)->where('idempotency_key', $idempotency_key);
 
         if ($lock) {
             $query->lockForUpdate();
@@ -219,16 +210,13 @@ class CheckoutService
 
         return $query->first();
     }
-    private function failure(
-        string $message,
-        string $code,
-        array $extra = []
-    ): array {
+
+    private function failure(string $message, string $code, array $errors = []): array
+    {
         return [
-            'error' => array_merge([
-                'message' => $message,
-                'code' => $code,
-            ], $extra),
+            'success' => false,
+            'message' => $message,
+            'errors'  => array_merge($errors, ['code' => $code]),
         ];
     }
 }

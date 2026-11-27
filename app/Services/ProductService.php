@@ -4,12 +4,41 @@ namespace App\Services;
 
 use App\Models\Product;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 
 class ProductService
 {
+    private const LIST_TTL = 3600;
 
+    private const VERSION_KEY = 'products:list:version';
 
     public function getProducts(array $filters): LengthAwarePaginator
+    {
+        // Normalize filters to generate consistent cache keys.
+        ksort($filters);
+
+        $version = Cache::get(self::VERSION_KEY, 0);
+
+        $page = request()->integer('page', 1);
+
+        // Generate32. a unique cache key for each filter combination and page.
+        $key = "products:list:v{$version}:" .
+            md5(json_encode($filters) . "|page={$page}");
+
+        return Cache::remember(
+            $key,
+            self::LIST_TTL,
+            fn () => $this->queryProducts($filters)
+        );
+    }
+
+    public function flushListCache(): void
+    {
+        // Incrementing the version invalidates all existing product list cache keys.
+        Cache::increment(self::VERSION_KEY);
+    }
+
+    private function queryProducts(array $filters): LengthAwarePaginator
     {
         $search = $filters['search'] ?? null;
         $minPrice = $filters['min_price'] ?? null;

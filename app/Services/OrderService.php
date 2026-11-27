@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 
 class OrderService
 {
-    public function paginateFor(User $user, int $perPage = 15): LengthAwarePaginator
+    public function getUserOrders(User $user, int $perPage = 20): LengthAwarePaginator
     {
         return Order::where('user_id', $user->id)
             ->with('items')
@@ -19,33 +19,33 @@ class OrderService
             ->paginate($perPage);
     }
 
-    public function cancel(Order $order, ?string $reason = null): Order
+
+    public function cancelOrder(Order $order, ?string $reason = null): array
     {
         return DB::transaction(function () use ($order, $reason) {
-            // نقفل الأوردر: طلبين إلغاء متزامنين يمشوا واحد ورا التاني
+            // Lock the order to prevent concurrent cancellation requests
             $order = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
 
-            // اتلغى قبل كده؟ نرجّعه من غير ما نرجّع المخزون تاني
+            // Already cancelled: return without restoring stock again
             if ($order->status === Order::STATUS_CANCELLED) {
-                return $order->load('items');
+                return ['success' => true, 'order' => $order->load('items')];
             }
 
             if (! $order->canTransitionTo(Order::STATUS_CANCELLED)) {
-                throw new BusinessException(
-                    "An order with status '{$order->status}' cannot be cancelled.",
-                    422,
-                    ['code' => 'invalid_order_status', 'status' => $order->status]
-                );
+                return [
+                    'success' => false,
+                    'message' => "An order with status '{$order->status}' cannot be cancelled.",
+                    'errors'  => ['code' => 'invalid_order_status', 'status' => $order->status],
+                ];
             }
 
-            // رجّع المخزون (بترتيب ثابت عشان الـ deadlock)
+            // Restore stock in a fixed order to reduce deadlocks
             foreach ($order->items()->orderBy('product_id')->get() as $item) {
-                Product::withTrashed()
-                    ->whereKey($item->product_id)
+                Product::whereKey($item->product_id)
                     ->increment('stock_quantity', $item->product_quantity);
             }
 
-            // رجّع الكوبون للعميل
+            // Remove promotion usage
             $order->promotionUsages()->delete();
 
             $order->status              = Order::STATUS_CANCELLED;
@@ -53,7 +53,8 @@ class OrderService
             $order->cancellation_reason = $reason;
             $order->save();
 
-            return $order->load('items');
+            return ['success' => true, 'order' => $order->load('items')];
         });
     }
+
 }
