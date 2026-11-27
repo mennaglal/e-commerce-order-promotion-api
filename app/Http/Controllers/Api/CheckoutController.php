@@ -9,13 +9,14 @@ use App\Http\Responses\ApiResponse;
 use App\Services\CheckoutService;
 use Illuminate\Http\JsonResponse;
 
+
 class CheckoutController extends Controller
 {
     public function __construct(private CheckoutService $checkoutService)
     {
     }
 
-    public function checkout(CheckoutRequest $request): JsonResponse
+    public function createOrder(CheckoutRequest $request): JsonResponse
     {
         $data = $request->validated();
 
@@ -25,8 +26,8 @@ class CheckoutController extends Controller
             $data['idempotency_key']
         );
 
-        if (!$result['success']) {
-            return ApiResponse::error($result['message'], 422, $result['errors']);
+        if (! $result['success']) {
+            return ApiResponse::failure($result);
         }
 
         $order = $result['order'];

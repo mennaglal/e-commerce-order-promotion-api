@@ -40,6 +40,11 @@ class PromotionCode extends Model
         return $this->hasMany(PromotionUsage::class, 'promotion_id');
     }
 
+    public function activeUsages(): HasMany
+    {
+        return $this->usages()->whereNull('cancelled_at');
+    }
+
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class, 'promotion_id');

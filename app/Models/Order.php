@@ -11,6 +11,8 @@ class Order extends Model
 {
     use HasFactory;
 
+    public const CURRENCY = 'EGP';
+
     /*
     |--------------------------------------------------------------------------
     | Order Status

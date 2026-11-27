@@ -15,7 +15,10 @@ class PromotionCodeController extends Controller
     public function index(Request $request): View
     {
         $promotions = PromotionCode::query()
-            ->withCount(['usages', 'orders'])
+            ->withCount([
+                'usages' => fn ($query) => $query->whereNull('cancelled_at'),
+                'orders',
+            ])
             ->when($request->filled('search'), function ($query) use ($request) {
                 $query->where(
                     'code',

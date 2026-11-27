@@ -27,8 +27,10 @@ return new class extends Migration
 
             $table->timestamps();
 
+
+            $table->index(['status', 'created_at']);
             $table->index(['status', 'price']);
-            $table->index('stock_quantity');
+            $table->index(['status', 'stock_quantity']);
 
         });
     }

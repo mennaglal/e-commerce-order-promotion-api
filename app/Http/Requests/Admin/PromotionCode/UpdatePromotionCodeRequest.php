@@ -47,7 +47,10 @@ class UpdatePromotionCodeRequest extends FormRequest
                 'required',
                 'numeric',
                 'gt:0',
-                'max:' . ($this->input('type') === PromotionCode::TYPE_PERCENTAGE ? 100 : '999999999999'),
+                Rule::when(
+                    $this->input('type') === PromotionCode::TYPE_PERCENTAGE,
+                    ['max:100']
+                ),
             ],
 
             'min_cart_amount' => ['nullable', 'numeric', 'min:0'],

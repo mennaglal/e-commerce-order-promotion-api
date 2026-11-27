@@ -32,7 +32,7 @@ class CartService
 
             $inventoryCheck = $this->inventory->checkAvailability($product, $totalQuantity);
 
-            if (! $inventoryCheck['available']) {
+            if (!$inventoryCheck['available']) {
                 return $inventoryCheck;
             }
 

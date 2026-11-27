@@ -37,7 +37,7 @@ return new class extends Migration
             $table->decimal('discount_amount', 12, 2)->default(0);
 
             $table->decimal('total', 12, 2);
-            $table->string('currency', 3);
+            $table->string('currency')->default('EGP');
 
 
             $table->text('address')->nullable();

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\PromotionCode;
 use App\Models\User;
 
+
 class PromotionCodeService
 {
     public function findByCode(string $code, bool $lock = false): ?PromotionCode
@@ -17,6 +18,7 @@ class PromotionCodeService
 
         return $query->first();
     }
+
 
     public function checkEligibility(PromotionCode $promo, User $user, string $subtotal): array
     {
@@ -39,12 +41,13 @@ class PromotionCodeService
             );
         }
 
-        if ($promo->usage_limit !== null && $promo->usages()->count() >= $promo->usage_limit) {
+        if ($promo->usage_limit !== null && $promo->activeUsages()->count() >= $promo->usage_limit) {
             return $this->invalid('This coupon has reached its usage limit.', 'coupon_usage_limit_reached');
         }
 
-        $promo_usage_user=$promo->usages()->where('user_id', $user->id)->count();
-        if ($promo->per_customer_limit !== null && $promo_usage_user  >= $promo->per_customer_limit) {
+        $customerUsages = $promo->activeUsages()->where('user_id', $user->id)->count();
+
+        if ($promo->per_customer_limit !== null && $customerUsages >= $promo->per_customer_limit) {
             return $this->invalid(
                 'You have already used this coupon the maximum number of times.',
                 'coupon_per_customer_limit_reached'
@@ -53,6 +56,7 @@ class PromotionCodeService
 
         return ['valid' => true];
     }
+
 
     public function calculateDiscount(PromotionCode $promo, string $subtotal): string
     {

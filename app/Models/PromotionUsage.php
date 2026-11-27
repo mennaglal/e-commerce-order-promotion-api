@@ -13,6 +13,10 @@ class PromotionUsage extends Model
         'order_id',
     ];
 
+    protected $casts = [
+        'cancelled_at' => 'datetime',
+    ];
+
     public function promotion(): BelongsTo
     {
         return $this->belongsTo(PromotionCode::class, 'promotion_id');

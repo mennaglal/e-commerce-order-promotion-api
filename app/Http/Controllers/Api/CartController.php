@@ -30,12 +30,8 @@ class CartController extends Controller
             $request->validated('quantity')
         );
 
-        if (!$result['available']) {
-            return ApiResponse::error(
-                $result['message'],
-                422,
-                $result['errors']
-            );
+        if (! $result['available']) {
+            return ApiResponse::failure($result);
         }
 
         return ApiResponse::success(
@@ -53,11 +49,7 @@ class CartController extends Controller
         );
 
         if (! $result['available']) {
-            return ApiResponse::error(
-                $result['message'],
-                422,
-                $result['errors']
-            );
+            return ApiResponse::failure($result);
         }
 
         return ApiResponse::success(

@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
+
 class OrderController extends Controller
 {
     public function __construct(private OrderService $orderService)
@@ -20,7 +21,8 @@ class OrderController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $perPage = $request->query('per_page', 20);
+        $perPage = $request->integer('per_page', 20);
+
         return ApiResponse::paginated(
             $this->orderService->getUserOrders($request->user(), $perPage),
             OrderResource::class
@@ -41,9 +43,13 @@ class OrderController extends Controller
         $result = $this->orderService->cancelOrder($order, $request->validated('reason'));
 
         if (! $result['success']) {
-            return ApiResponse::error($result['message'], 422, $result['errors']);
+            return ApiResponse::failure($result);
         }
 
-        return ApiResponse::success(new OrderResource($result['order']), 'Order cancelled successfully.');
+        $message = ($result['already_cancelled'] ?? false)
+            ? 'Order was already cancelled.'
+            : 'Order cancelled successfully.';
+
+        return ApiResponse::success(new OrderResource($result['order']), $message);
     }
 }

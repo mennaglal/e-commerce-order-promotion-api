@@ -12,9 +12,10 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+
 class CheckoutService
 {
-    private const CURRENCY = 'EGP';
+    private const TRANSACTION_ATTEMPTS = 3;
 
     public function __construct(
         private InventoryService $inventory,
@@ -26,7 +27,8 @@ class CheckoutService
     {
         try {
             $result = DB::transaction(
-                fn () => $this->placeOrder($user, $data, $idempotency_key)
+                fn () => $this->placeOrder($user, $data, $idempotency_key),
+                self::TRANSACTION_ATTEMPTS
             );
 
             // Dispatch the event only for newly created orders.
@@ -146,14 +148,14 @@ class CheckoutService
             $discount = $this->promotions->calculateDiscount($promotion, $subtotal);
         }
 
-        // All checks passed. Start creating the order.
+        //  Start creating the order.
 
         $order = new Order([
             'customer_name'  => $data['customer_name'] ?? $user->name,
             'customer_email' => $data['customer_email'] ?? $user->email,
             'customer_phone' => $data['customer_phone'] ?? $user->phone,
             'address'        => $data['address'],
-            'payment_method'        => $data['payment_method'],
+            'payment_method' => $data['payment_method'],
             'notes'          => $data['notes'] ?? null,
         ]);
 
@@ -163,7 +165,7 @@ class CheckoutService
         $order->subtotal = $subtotal;
         $order->discount_amount = $discount;
         $order->total = bcsub($subtotal, $discount, 2);
-        $order->currency = self::CURRENCY;
+        $order->currency = Order::CURRENCY;
         $order->status = Order::STATUS_PENDING;
         $order->idempotency_key = $idempotency_key;
 
@@ -171,7 +173,7 @@ class CheckoutService
 
         foreach ($lines as $line) {
 
-            // Save product details to keep the original order information.
+            // Save product details
             $order->items()->create([
                 'product_id'       => $line['product_id'],
                 'product_name'     => $line['product_name'],
@@ -180,7 +182,7 @@ class CheckoutService
                 'product_quantity' => $line['product_quantity'],
             ]);
 
-            // Reduce stock after checking availability.
+            // Reduce stock
             $line['product']->decrement(
                 'stock_quantity',
                 $line['product_quantity']
@@ -194,7 +196,7 @@ class CheckoutService
             ]);
         }
 
-        // Clear the cart after successfully creating the order.
+        // Clear the cart after successfully creating the order
         $cart->items()->delete();
 
         return ['success' => true, 'order' => $order->load('items')];

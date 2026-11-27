@@ -8,19 +8,15 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Support\Facades\Mail;
 
-class SendOrderConfirmationEmail  implements ShouldQueue
-{
-    /**
-     * Create the event listener.
-     */
-    public function __construct()
-    {
-        //
-    }
 
-    /**
-     * Handle the event.
-     */
+class SendOrderConfirmationEmail implements ShouldQueue
+{
+    use InteractsWithQueue;
+
+    public int $tries = 3;
+
+    public array $backoff = [10, 60];
+
     public function handle(OrderPlaced $event): void
     {
         $order = $event->order->load('items');

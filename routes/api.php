@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\ProductController;
 use Illuminate\Support\Facades\Route;
 
+
 // Authentication
 Route::post('/register', [AuthController::class, 'register'])
     ->middleware('throttle:register');
@@ -14,7 +15,7 @@ Route::post('/register', [AuthController::class, 'register'])
 Route::post('/login', [AuthController::class, 'login'])
     ->middleware('throttle:login');
 
-// Public Products
+// Public products
 Route::prefix('products')
     ->middleware('throttle:api-public')
     ->controller(ProductController::class)
@@ -23,7 +24,7 @@ Route::prefix('products')
         Route::get('/{id}', 'show')->whereNumber('id');
     });
 
-// Authenticated Routes
+// Authenticated customer routes
 Route::middleware(['auth:sanctum', 'throttle:api-auth'])
     ->group(function () {
 
@@ -31,19 +32,22 @@ Route::middleware(['auth:sanctum', 'throttle:api-auth'])
         Route::get('/profile', [AuthController::class, 'profile']);
 
         // Cart
-        Route::prefix('cart')->group(function () {
-            Route::get('/', [CartController::class, 'index']);
-            Route::post('/items', [CartController::class, 'store']);
-            Route::patch('/items/{itemId}', [CartController::class, 'update']);
-            Route::delete('/items/{itemId}', [CartController::class, 'destroy']);
-        });
+        Route::prefix('cart')
+            ->controller(CartController::class)
+            ->group(function () {
+                Route::get('/', 'index');
+                Route::post('/items', 'store');
+                Route::patch('/items/{itemId}', 'update')->whereNumber('itemId');
+                Route::delete('/items/{itemId}', 'destroy')->whereNumber('itemId');
+            });
 
         // Checkout
-        Route::post('/checkout', [CheckoutController::class, 'checkout'])
+        Route::post('/checkout', [CheckoutController::class, 'createOrder'])
             ->middleware('throttle:checkout');
 
         // Orders
         Route::get('/orders', [OrderController::class, 'index']);
+
         Route::get('/orders/{order}', [OrderController::class, 'show'])
             ->whereNumber('order');
 
